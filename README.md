@@ -33,9 +33,12 @@ This will install required packages: `matplotlib`, `numpy`, and `click`.
 ## Files
 
 - `main.py` - CLI tool for running benchmarks and generating plots
-- `benchmark.py` - Core benchmark script with 100 replicated test functions
-- `plot_results.py` - Visualization functions for generating plots and statistics
-- `collect_data.sh` - Legacy bash script (optional, CLI is recommended)
+- `benchmark.py` - Core benchmark script with 100 replicated test functions (allocation-heavy)
+- `benchmarks/` - Directory containing alternative benchmark scripts
+  - `fib.py` - Fibonacci benchmark (computation-heavy)
+  - `original.py` - Reference copy of the original benchmark
+  - `README.md` - Benchmark documentation
+- `plot_results.py` - Plotting functions and statistical analysis
 - `pyproject.toml` - Project dependencies and configuration
 - `README.md` - This file
 
@@ -72,7 +75,9 @@ uv run python main.py collect [OPTIONS]
 - `--end INTEGER` - Ending iteration count (default: 20000)
 - `--step INTEGER` - Step size between iterations (default: 1)
 - `--skip-cpython` - Skip CPython baseline collection
+- `--collect-jit-logs` - Collect JIT compilation logs using PYPYLOG
 - `--force` - Overwrite existing data files without prompting
+- `--benchmark-script TEXT` - Path to benchmark script (default: 'benchmark.py')
 - `--pypy-path TEXT` - Path to PyPy executable (default: 'pypy')
 - `--python-path TEXT` - Path to CPython executable (default: 'python3')
 - `--output-dir PATH` - Custom output directory (default: `results/YYYY-MM-DD_HH-MM-SS`)
@@ -85,17 +90,28 @@ uv run python main.py collect --start 1 --end 5000 --step 10
 # Skip CPython baseline
 uv run python main.py collect --skip-cpython
 
+# Collect JIT logs for slowdown analysis
+uv run python main.py collect --collect-jit-logs
+
+# Use a different benchmark script
+uv run python main.py collect --benchmark-script benchmarks/fib.py
+
 # Force overwrite existing data
 uv run python main.py collect --force
 
 # Specify custom output directory
 uv run python main.py collect --output-dir results/my-custom-run
+
+# Collect data around iteration 1041 for slowdown calculation
+uv run python main.py collect --start 1000 --end 1100 --step 1 --collect-jit-logs
 ```
 
 Creates a timestamped directory under `results/` with data files:
 - `data_jit.txt` - PyPy with JIT enabled
 - `data_nojit.txt` - PyPy with JIT disabled
 - `data_cpython.txt` - CPython baseline (if not skipped)
+- `jit_logs/` - JIT compilation logs (if `--collect-jit-logs` enabled)
+- `config.json` - Configuration parameters used for this run
 
 #### 2. Generate visualizations
 
@@ -120,9 +136,10 @@ uv run python main.py plot --output-dir custom-plots
 ```
 
 Creates plots in the results directory (or custom location):
-- `execution_times.png` - Execution time vs iterations
+- `execution_times.png` - Execution time vs iterations with linear regression fits
 - `speedup_factor.png` - JIT speedup over no-JIT
-- `overhead_ratio.png` - Overhead compared to CPython
+- `overhead_ratio.png` - Overhead ratio compared to CPython
+- `cpython_comparison.png` - Direct comparison of JIT vs CPython with fits (requires CPython data)
 
 #### 3. List all benchmark runs
 
@@ -165,6 +182,38 @@ uv run python main.py clean --all
 uv run python main.py clean --run-dir results/2025-10-09_14-30-45
 ```
 
+#### 5. Analyze JIT compilation logs
+
+```bash
+uv run python main.py analyze-logs [OPTIONS]
+```
+
+Calculates the meta-tracing interpreter slowdown factor (~900×) from JIT compilation logs.
+Implements the exact calculation from the blog post.
+
+**Options:**
+- `--results-dir PATH` - Results directory containing jit_logs subdirectory [required]
+- `--threshold INTEGER` - JIT compilation threshold (default: 1041)
+
+**Examples:**
+```bash
+# Analyze logs from a specific run
+uv run python main.py analyze-logs --results-dir results/2025-10-09_14-30-45
+
+# Use a custom threshold
+uv run python main.py analyze-logs --results-dir results/my-run --threshold 2000
+```
+
+**Output:**
+- Tracing time statistics from JIT logs
+- Meta-tracing slowdown factor (how many times slower than regular interpretation)
+- Automatically adapts to your data collection step size
+
+**Note:** For accurate results, collect data around iteration 1041:
+```bash
+uv run python main.py collect --start 1000 --end 1100 --step 1 --collect-jit-logs
+```
+
 ### Working with Multiple Runs
 
 The CLI automatically organizes results into timestamped directories, making it easy to run multiple benchmarks and compare them:
@@ -199,6 +248,7 @@ View help for a specific command:
 ```bash
 uv run python main.py collect --help
 uv run python main.py plot --help
+uv run python main.py analyze-logs --help
 uv run python main.py list --help
 uv run python main.py clean --help
 ```
@@ -246,9 +296,30 @@ These operations are replicated across 100 functions to reduce noise in measurem
 
 ## Interpreting Results
 
-- **Execution Times Plot**: Shows raw execution time for each configuration. JIT starts slower but eventually outpaces no-JIT.
-- **Speedup Plot**: Shows the ratio of no-JIT to JIT time. Values > 1.0 indicate JIT is faster.
-- **Overhead Ratio Plot**: Compares PyPy performance to CPython baseline. Shows the meta-tracing interpreter overhead.
+### Plot Descriptions
+
+- **Execution Times Plot** (`execution_times.png`): Scatter plot showing execution time vs iterations
+  - Color-coded dots: PyPy with JIT (blue), PyPy without JIT (light blue), CPython (green)
+  - JIT threshold vertical line at iteration 1041
+  - Text box with linear regression statistics and speedup calculations
+  - Y-axis in milliseconds for readability
+
+- **Speedup Factor Plot** (`speedup_factor.png`): Shows the ratio of no-JIT to JIT time
+  - Values > 1.0 indicate JIT is faster
+  - Break-even point shows where JIT compilation pays off
+
+- **Overhead Ratio Plot** (`overhead_ratio.png`): Compares PyPy to CPython baseline
+  - Shows meta-tracing interpreter overhead
+  - Values > 1.0 indicate PyPy is slower than CPython
+
+- **CPython Comparison Plot** (`cpython_comparison.png`): Direct PyPy JIT vs CPython comparison
+  - Shows when PyPy catches up to and surpasses CPython performance
+  - Includes regression analysis and intersection calculations
+
+### Color Scheme
+- **Blue tones**: PyPy configurations (dark blue = JIT, light blue = no-JIT)
+- **Green**: CPython baseline
+- **Consistent across all plots** for easy comparison
 
 ## References
 

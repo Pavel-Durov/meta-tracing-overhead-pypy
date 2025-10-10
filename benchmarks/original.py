@@ -6,6 +6,12 @@ https://cfbolz.de/posts/speed-of-tracing/
 
 The benchmark measures the overhead of PyPy's meta-tracing interpreter by running
 100 replicated versions of a simple function with varying iteration counts.
+
+
+This function is the ideal case for PyPy's JIT compiler, as it has a
+tight loop with many object allocations that all have predictable
+lifetimes. There is no control flow inside the loop. The JIT compiler
+can optimize this loop body extremely well, to just an integer addition.
 """
 
 # from __future__ import print_function
